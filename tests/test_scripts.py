@@ -197,6 +197,19 @@ class VietnameseNumbers(unittest.TestCase):
         self.assertEqual(normalize_vi("Bấm New invoice"), "Bấm New invoice")
 
 
+class FfmpegCompat(unittest.TestCase):
+    def test_filter_script_flag_by_version(self):
+        import common
+        old = common._FF_MAJOR
+        try:
+            for major, flag in ((6, "-filter_complex_script"), (7, "-/filter_complex"), (8, "-/filter_complex"),
+                                (0, "-/filter_complex")):
+                common._FF_MAJOR = major
+                self.assertEqual(common.filter_script_args("f.txt"), [flag, "f.txt"])
+        finally:
+            common._FF_MAJOR = old
+
+
 class Srt(unittest.TestCase):
     def test_srt_format(self):
         s = overlay.srt([{"a": 1.5, "b": 62.25, "text": "Xin chào"}])

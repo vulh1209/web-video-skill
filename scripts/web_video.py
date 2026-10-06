@@ -14,6 +14,7 @@ USAGE
   web-video report RUN                           summary.txt or bug-report.md
   web-video calibrate RUN [--set S]              show or set the video/event clock offset
   web-video make STORYBOARD --slug NAME          rehearse, record, tts, edit, verify, export, (redact), report
+  web-video profile login|import|check|list|delete ...   signed-in browser profile for --profile NAME
   web-video install-tts | selftest | lint | path | help
 Extra flags go to the underlying script (`web-video <command> --help`).
 """
@@ -29,7 +30,8 @@ ROOT = S.parent
 PY = sys.executable
 SCRIPT = {"discover": "record.py", "rehearse": "record.py", "record": "record.py", "tts": "tts.py",
           "edit": "edl.py", "verify": "verify.py", "redact": "redact.py", "report": "report.py",
-          "calibrate": "calibrate.py", "install-tts": "install_tts.py", "selftest": "selftest.py"}
+          "calibrate": "calibrate.py", "install-tts": "install_tts.py", "selftest": "selftest.py",
+          "profile": "browser_profile.py"}
 
 
 def call(script: str, *args) -> int:
@@ -40,7 +42,9 @@ def make(args: list[str]) -> int:
     if not args:
         sys.exit("web-video make STORYBOARD --slug NAME")
     sb, rest = args[0], args[1:]
-    if call("record.py", sb, "--rehearse"):
+    browser = [x for i, x in enumerate(rest) if x in ("--profile", "--channel")
+               or (i and rest[i - 1] in ("--profile", "--channel"))]
+    if call("record.py", sb, "--rehearse", *browser):
         return 2
     r = subprocess.run([PY, str(S / "record.py"), sb, *rest], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")

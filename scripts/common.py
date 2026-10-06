@@ -139,6 +139,12 @@ def validate_storyboard(sb) -> list[str]:
                 errs.append(f"bug.{k} is required in bug-report mode")
         if not any(s.get("bug") for s in steps):
             errs.append("bug-report: mark the step where the bug shows with 'bug: true'")
+    if sb.get("profile") and sb.get("storage_state"):
+        errs.append("use either 'profile' or 'storage_state', not both")
+    if sb.get("channel") not in (None, "chrome", "chrome-beta", "msedge", "chromium"):
+        errs.append("channel must be chrome, chrome-beta, msedge or chromium")
+    if sb.get("channel") and not sb.get("profile"):
+        errs.append("'channel' applies only with 'profile'")
     vp = sb.get("viewport", list(DEFAULT_VIEWPORT))
     if not (isinstance(vp, list) and len(vp) == 2 and all(isinstance(v, int) and v % 2 == 0 for v in vp)):
         errs.append("viewport must be [even_width, even_height]")
@@ -192,6 +198,27 @@ def probe_summary(path) -> dict:
         "width": v and v.get("width"), "height": v and v.get("height"), "fps": fps,
         "audio_codec": a and a.get("codec_name"),
     }
+
+
+_FF_MAJOR = None
+
+
+def ffmpeg_major() -> int:
+    """Major version of the ffmpeg on PATH (0 if unknown, e.g. git builds)."""
+    global _FF_MAJOR
+    if _FF_MAJOR is None:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-version"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace").stdout
+        m = re.search(r"ffmpeg version n?(\d+)\.", out)
+        _FF_MAJOR = int(m.group(1)) if m else 0
+    return _FF_MAJOR
+
+
+def filter_script_args(path: str) -> list[str]:
+    """Read a filter graph from a file: `-/filter_complex FILE` on ffmpeg >= 7 (the old
+    `-filter_complex_script` was deprecated in 7 and removed in 8); unknown versions use the new form."""
+    major = ffmpeg_major()
+    return ["-filter_complex_script", path] if 0 < major < 7 else ["-/filter_complex", path]
 
 
 def run_ffmpeg(args: list[str], quiet: bool = True):

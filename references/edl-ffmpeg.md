@@ -1,6 +1,6 @@
 # EDL and ffmpeg
 
-`scripts/edl.py RUN --render draft|final|none` turns `events.json` into `edl.json` + `filter.txt` and renders with one `ffmpeg -filter_complex_script` call (cwd = run folder, all paths relative).
+`scripts/edl.py RUN --render draft|final|none` turns `events.json` into `edl.json` + `filter.txt` and renders with one ffmpeg call that reads the graph from a file (`-/filter_complex filter.txt` on ffmpeg ≥ 7, `-filter_complex_script` before) (cwd = run folder, all paths relative).
 
 ## How the EDL is built
 
@@ -61,4 +61,4 @@ ffmpeg -i in.mp4 -filter_complex "[0:v]fps=30,split[a][b];[a]trim=0:4,setpts=PTS
 # crossfade two clips (both need the same timebase)
 [a]settb=AVTB,fps=30[a1];[b]settb=AVTB,fps=30[b1];[a1][b1]xfade=transition=fade:duration=0.4:offset=4.6
 ```
-Always write filters to a file and pass `-filter_complex_script`; build argv lists, never shell strings from user input.
+Always write filters to a file and pass `-/filter_complex file` (ffmpeg ≥ 7; `-filter_complex_script` on 6.x, removed in 8); build argv lists, never shell strings from user input.

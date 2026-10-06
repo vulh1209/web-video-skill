@@ -8,6 +8,8 @@ USAGE
   record.py STORYBOARD.yaml --out DIR                # real take into an explicit, empty DIR
 
 Options: --headed, --timeout MS (default 10000), --no-flash
+  --profile NAME|PATH   run in a persistent browser profile (signed-in user; see browser_profile.py)
+  --channel chrome|msedge|chromium   browser build for --profile (default: installed Chrome)
 Step actions ('do' is one string or a list): see references/storyboard.md
   goto PATH|URL   click SEL   hover SEL   check SEL   type SEL | TEXT   fill SEL | TEXT
   press KEY   select SEL | VALUE   scroll PX|SEL   wait MS   expect SEL   expect_text SEL | TEXT   wait_url GLOB
@@ -367,6 +369,9 @@ def main():
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--timeout", type=int, default=10000)
     ap.add_argument("--no-flash", action="store_true")
+    ap.add_argument("--profile", help="persistent profile name or user-data dir (overrides storyboard 'profile')")
+    ap.add_argument("--channel", choices=("chrome", "chrome-beta", "msedge", "chromium"),
+                    help="browser build for --profile (overrides storyboard 'channel')")
     a = ap.parse_args()
 
     sb = load_storyboard(a.storyboard)
@@ -380,6 +385,10 @@ def main():
     sb_dir = a.storyboard.resolve().parent
     storage = sb.get("storage_state")
     storage = str((sb_dir / storage).resolve()) if storage else None
+    profile = a.profile or sb.get("profile")
+    channel = a.channel or sb.get("channel")
+    if profile and storage:
+        die("use either a profile or storage_state, not both")
 
     run = None
     if mode == "record":
@@ -399,21 +408,29 @@ def main():
     failed = None
     started = dt.datetime.now().isoformat(timespec="seconds")
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=not a.headed)
-        ctx_kw = dict(viewport={"width": vw, "height": vh}, storage_state=storage)
+        ctx_kw = dict(viewport={"width": vw, "height": vh})
         if mode == "record":
             ctx_kw.update(record_video_dir=str(run / "_video"), record_video_size={"width": vw, "height": vh},
                           record_har_path=str(paths["har"]),
                           record_har_content="embed" if sb["mode"] == "bug-report" else "omit")
-        ctx = browser.new_context(**ctx_kw)
+        if profile:
+            import browser_profile
+            browser = None
+            ctx = browser_profile.open_context(pw, profile, channel, headless=not a.headed, **ctx_kw)
+        else:
+            browser = pw.chromium.launch(headless=not a.headed)
+            ctx = browser.new_context(storage_state=storage, **ctx_kw)
         if mode == "record":
             ctx.add_init_script(CURSOR_JS)
             ctx.tracing.start(screenshots=True, snapshots=True, sources=False)
+        restored = list(ctx.pages)  # a persistent profile opens with a blank or restored tab
         page = ctx.new_page()
+        for old in restored:
+            old.close()
         r = Runner(page, sb["url"], (vw, vh), mode, a.timeout)
         r.attach_listeners()
         video_src = None
-        browser_version = browser.version
+        browser_version = browser.version if browser else page.evaluate("navigator.userAgent")
         try:
             if mode == "record" and not a.no_flash:
                 r.flash()
@@ -428,7 +445,8 @@ def main():
                     print(f"warning: trace not saved: {e}", file=sys.stderr)
                 video_src = page.video.path() if page.video else None
             ctx.close()  # flushes video and HAR (Hard rule 5)
-            browser.close()
+            if browser:
+                browser.close()
 
     errors = [e for e in r.events if e["kind"] == "error"]
     if mode == "discover":
@@ -470,7 +488,8 @@ def main():
     save_json(paths["meta"], {"status": "aborted" if failed is not None else "ok",
                               "failed_step": None if failed is None else failed + 1,
                               "started_at": started, "url": sb["url"], "playwright": pw_version,
-                              "browser": browser_version, "storage_state": storage, "raw_probe": probe,
+                              "browser": browser_version, "storage_state": storage,
+                              "profile": pathlib.Path(profile).name if profile else None, "raw_probe": probe,
                               "video_offset": off, "offset_method": method, "errors": len(errors)})
     print(f"run dir: {run}")
     print(f"raw.webm {probe['duration']:.2f}s {probe['width']}x{probe['height']} ~{probe['fps']} fps; "

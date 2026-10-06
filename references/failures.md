@@ -14,6 +14,9 @@ Collected from building this skill and from issues reported against other video 
 | cursor missing after navigation | new document; cursor appears on first move | record.py re-moves the mouse after navigations; if still missing, add `hover` |
 | `offset_method: none` | `--no-flash`, or the app painted over the flash | re-take without `--no-flash`; or `calibrate.py RUN --set 0.1` after checking a click frame |
 | native dropdown/file picker not visible | DOM cursor and video see only the page | caption it, or record that part with the OS recorder (`references/record.md`) and use edit-only |
+| SSO page in a profile take | profile signed out, or import could not decrypt cookies | `browser_profile.py check`; then `login NAME URL` |
+| `ProcessSingleton` / profile in use | another take or `login` window still holds the profile | close it; one process per profile |
+| Keychain prompt during a take (macOS) | first use of the Chrome Safe Storage key | allow it once, or use `login` instead of `import` |
 | password in trace | Playwright records `fill()` values | always run `redact.py`; prefer `storage_state` over typed logins |
 
 ## Editing and rendering
@@ -28,6 +31,7 @@ Collected from building this skill and from issues reported against other video 
 | zoom shaky | integer pixel steps in zoompan | final render supersamples 2x (draft does not) |
 | boxes instead of letters | font lacks glyphs (Vietnamese, CJK) | `WEB_VIDEO_FONT=/path/to/font.ttf` |
 | `No such filter: drawtext/subtitles` | ffmpeg built without freetype/libass | `brew reinstall ffmpeg` (Homebrew default has both) or a static build |
+| `Error splitting the argument list: Option not found` | ffmpeg 8 removed `-filter_complex_script` | use `-/filter_complex file`; edl.py picks the form by ffmpeg version |
 | filter error mentioning quotes or `:` | text in the filter string | edl.py always uses textfiles; do the same in hand edits |
 | micro-stutter | hold shorter than 0.2 s | edl.py skips those (`MIN_HOLD`) |
 | clicks/pops in narration | `-c copy` concat of AAC | re-encode continuously, 30 ms fades (edl.py does) |

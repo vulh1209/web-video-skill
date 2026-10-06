@@ -13,6 +13,8 @@ title: "Tạo hoá đơn mới"            # intro card (feature-demo) / panel t
 subtitle: "Bản 2.3"                 # optional, intro card second line
 outro: "Xong! Hoá đơn đã được lưu." # optional outro card (feature-demo)
 storage_state: auth.json            # optional Playwright storage state, relative to the storyboard file
+profile: demo                       # optional persistent profile (name or user-data dir); not with storage_state
+channel: chrome                     # optional browser build for the profile: chrome | chrome-beta | msedge | chromium
 bug:                                # bug-report only
   expected: "..."                   # required
   actual: "..."                     # required
@@ -53,7 +55,7 @@ Selectors are Playwright selectors (`css`, `text=`, `role=button[name="Save"]`, 
 
 **YAML trap:** `#` after a space starts a comment. Quote every action containing `#`: `- 'fill #email | a@b.c'`. `record.py` detects the truncated line and says so.
 
-Secrets: values typed into password inputs or selectors named like password/token/otp are masked in `events.json`, and `redact.py` removes them from trace/HAR. Better still, log in once and pass `storage_state` so no password is typed during the take.
+Secrets: values typed into password inputs or selectors named like password/token/otp are masked in `events.json`, and `redact.py` removes them from trace/HAR. Better still, log in once and pass `storage_state`, or use a `profile` for SSO sites, so no password is typed during the take.
 
 ## Writing captions and narration
 

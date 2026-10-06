@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import overlay as ov  # noqa: E402
-from common import (FPS, die, link_or_copy, load_json, load_storyboard, need, probe_summary,  # noqa: E402
+from common import (FPS, die, filter_script_args, link_or_copy, load_json, load_storyboard, need, probe_summary,  # noqa: E402
                     run_paths, save_json, snap)
 
 LEAD = 0.5                     # seconds kept before the first visible step
@@ -405,7 +405,7 @@ def render(run: pathlib.Path, src: str, inputs: list[str], has_audio: bool, draf
     args = ["-i", src]
     for f in inputs:
         args += ["-i", f]
-    args += ["-filter_complex_script", "filter.txt", "-map", "[outv]"]
+    args += filter_script_args("filter.txt") + ["-map", "[outv]"]
     if has_audio:
         args += ["-map", "[outa]", "-c:a", "aac", "-b:a", "160k"]
     args += ["-c:v", "libx264", "-preset", "veryfast" if draft else "medium", "-crf", "30" if draft else "20",

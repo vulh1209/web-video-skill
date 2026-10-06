@@ -29,7 +29,7 @@ Not for: tutorials over 3 min, native desktop apps (record them with the OS reco
 
 1. **Ask, confirm, execute.** Show the storyboard in plain language and wait for a yes before the real take.
 2. **Nothing leaves the machine without a yes.** No uploads, posts, issue comments or accounts. Cloud TTS (`tts.py --allow-cloud`) sends text out: ask first. Default narration is local (Piper / `say`) or captions only.
-3. **Test data only.** Test accounts or `storage_state`; seed and clean fixtures; never film production customer data. Run `redact.py` before sharing trace/HAR/console; attach only `*.redacted.*`.
+3. **Test data only.** Test accounts, `storage_state` or a browser profile (only when the user asks for their own sign-in); seed and clean fixtures; never film production customer data. Run `redact.py` before sharing trace/HAR/console; attach only `*.redacted.*`.
 4. **One clock.** Times come from `events.json` plus the single `video_offset` that `calibrate.py` writes. Never add an offset anywhere else. If it is wrong, fix it with `calibrate.py RUN --set`.
 5. **Never overwrite a run.** `record.py --slug` creates `video-out/<slug>/v<N>/`; re-edits write new files in that run only.
 6. **A click counts only if it happened.** `record.py` refuses hidden, off-screen or covered targets; you confirm the effect in the contact sheet.
@@ -49,7 +49,7 @@ If `video-out/<slug>/project.md` exists, read it and summarise the last run in o
 
 ## Step 1. Inputs and storyboard
 
-Ask for everything missing in **one** message: URL and start route; login (test account or storage state); the flow and what the viewer must see; may the take create/delete data; output folder; language of captions. For bug-report also: expected, actual, environment/build, reporter's version.
+Ask for everything missing in **one** message: URL and start route; login (test account, storage state, or the user's browser profile for SSO sites); the flow and what the viewer must see; may the take create/delete data; output folder; language of captions. For bug-report also: expected, actual, environment/build, reporter's version.
 
 Write `storyboard.yaml` (schema and caption rules: `references/storyboard.md`; examples: `assets/examples/feature-demo.yaml`, `assets/examples/bug-report.yaml`):
 ```yaml
@@ -71,6 +71,16 @@ $PY $WV/scripts/record.py storyboard.yaml --rehearse    # every step, fail loudl
 $PY $WV/scripts/record.py storyboard.yaml --slug invoice-demo   # the take; prints "run dir: ..."
 RUN=video-out/invoice-demo/v1      # copy the printed run dir; never pick "the latest" folder
 ```
+**Sites behind SSO (Google, Okta):** Playwright cannot sign in for the user. Use a persistent profile; the user signs in, you never type a password:
+```bash
+$PY $WV/scripts/browser_profile.py chrome-profiles                     # Chrome profiles: dir | name | account
+$PY $WV/scripts/browser_profile.py import demo --from-chrome "Profile 1"   # copy that profile's sessions (macOS)
+$PY $WV/scripts/browser_profile.py login demo https://app.example.com  # or: user signs in a real window, closes it
+$PY $WV/scripts/browser_profile.py check demo https://app.example.com  # headless check before the take
+$PY $WV/scripts/record.py storyboard.yaml --rehearse --profile demo    # or `profile: demo` in the storyboard
+```
+Ask which Chrome profile first. A profile holds live sessions: `browser_profile.py delete demo` after the video, and redact HAR/trace (cookies) before sharing. Details: `references/record.md`.
+
 Use selectors from the discover dump, never guesses. For bug-report, rehearse must print `bug step reached` (and the errors you expect); if not, the bug did not reproduce: stop and report (status vocabulary in `references/bug-report.md`).
 The take writes `raw.webm events.json console.json net.har trace.zip meta.json` and calibrates the offset with a sync flash. Exit 2 = a step failed (artifacts kept), 3 = no video. Details, limits (25 fps VP8, native dropdowns invisible): `references/record.md`.
 
@@ -112,6 +122,7 @@ Set the bug-report **status** yourself (`confirmed` / `partially confirmed` / `n
 
 | Script | Does |
 |---|---|
+| `scripts/browser_profile.py` | persistent signed-in profiles: import from Chrome, interactive login, check, delete |
 | `scripts/record.py` | storyboard → discover / rehearse / take with cursor, ripple, event log, HAR, trace |
 | `scripts/calibrate.py` | sync-flash offset (auto after a take); `--set` / `--show` |
 | `scripts/tts.py`, `scripts/install_tts.py` | per-step narration (Piper Vietnamese via `scripts/piper_worker.py`, or `say`; cloud only with `--allow-cloud`); one-time voice install |
@@ -130,6 +141,7 @@ Set the bug-report **status** yourself (`confirmed` / `partially confirmed` / `n
 
 ## Quick failure map
 
+- SSO site shows the sign-in page: the profile is signed out; `browser_profile.py login NAME URL`, then `check`.
 - Step fails in rehearse: use the printed element list; selector matches 2+ elements → make it specific.
 - Zoom/caption a few frames off: `calibrate.py RUN --show`, then `--set`; re-run edl.py.
 - Click recorded but nothing happens on screen: element covered or wrong target; check `click*+0.3` frame.

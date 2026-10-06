@@ -20,6 +20,35 @@ Common options: `--headed` (watch it), `--timeout 15000` (slow apps), `--no-flas
 6. On a `bug: true` step logs `bug` after the settle wait, with the box of `bug_target` or the last clicked element.
 7. Closes the context in `finally` (flushes video and HAR), moves the video to `raw.webm`, ffprobes it (exit 3 if missing or empty), calibrates, writes `meta.json`.
 
+## Persistent profiles (signed-in user, SSO)
+
+`--profile NAME` (or `profile:` in the storyboard) runs the take in `launch_persistent_context` on a Chromium
+user-data dir under `~/.cache/web-video/profiles/NAME` (`WEB_VIDEO_PROFILE_ROOT` overrides; a path also works).
+`scripts/browser_profile.py` manages them:
+
+| Command | Does |
+|---|---|
+| `chrome-profiles` | list Chrome profiles on this machine (dir, name, account) |
+| `import NAME --from-chrome "Profile 1" [--replace]` | copy cookies, site storage and `Local State` from that Chrome profile |
+| `login NAME URL` | open a real Chrome window without automation flags; the user signs in and closes it |
+| `check NAME URL [--expect-status-url URL]` | headless load; exit 1 when the status URL is not 200 |
+| `list`, `delete NAME` | inventory and cleanup |
+
+Rules and limits:
+
+- The live Chrome profile is never used directly: Chrome locks it while running, and Chrome 136+ refuses
+  automation on its default user-data dir. `import` makes a separate copy instead.
+- The take uses installed Chrome (`channel: chrome`, the default when Chrome exists) and drops Playwright's
+  `--use-mock-keychain` and `--password-store=basic`, so cookies copied from Chrome decrypt with the user's
+  Keychain key (macOS). macOS may ask once for Keychain access to "Chrome Safe Storage".
+- Windows: Chrome 127+ binds cookie encryption to the Chrome install (app-bound encryption); an imported copy
+  can come up signed out. Use `login` there.
+- `login` removes `--enable-automation` and sets `--disable-blink-features=AutomationControlled`, because
+  Google sign-in rejects windows that announce automation. Takes keep the normal flags.
+- The profile opens with a blank or restored tab; record.py closes it and records its own page.
+- `meta.json` stores only the profile name. HAR and trace still contain cookies: run `redact.py` before
+  sharing, and `delete` the profile when the video is done.
+
 ## Run folder
 
 ```
