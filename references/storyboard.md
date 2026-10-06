@@ -13,6 +13,8 @@ title: "Tạo hoá đơn mới"            # intro card (feature-demo) / panel t
 subtitle: "Bản 2.3"                 # optional, intro card second line
 outro: "Xong! Hoá đơn đã được lưu." # optional outro card (feature-demo)
 storage_state: auth.json            # optional Playwright storage state, relative to the storyboard file
+theme: theme.yaml                   # feature-demo: the project's theme (theme.py init --repo …); `clean` only as a fallback
+theme_label: "Release 2.3"          # optional mono label on every themed frame
 profile: demo                       # optional persistent profile (name or user-data dir); not with storage_state
 channel: chrome                     # optional browser build for the profile: chrome | chrome-beta | msedge | chromium
 bug:                                # bug-report only

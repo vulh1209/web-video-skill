@@ -121,7 +121,12 @@ def main():
             print(f"== {mode}", flush=True)
             sb = work / f"{mode}.yaml"
             text = (ROOT / "assets" / "examples" / f"{mode}.yaml").read_text(encoding="utf-8")
-            sb.write_text(text.replace("http://localhost:8765", f"http://localhost:{port}"), encoding="utf-8")
+            text = text.replace("http://localhost:8765", f"http://localhost:{port}")
+            if mode == "feature-demo":      # a video of project X uses X's design: draft the theme from the app
+                run([PY, HERE / "theme.py", "init", "--repo", ROOT / "assets" / "fixture",
+                     "--out", work / "theme.yaml", "--force"], capture=True)
+                text += "\ntheme: theme.yaml\ntheme_label: Selftest\n"
+            sb.write_text(text, encoding="utf-8")
             run([PY, HERE / "record.py", sb, "--rehearse"], cwd=work, capture=True)
             out = run([PY, HERE / "record.py", sb, "--slug", mode, "--root", work / "video-out"],
                       cwd=work, capture=True).stdout
@@ -131,12 +136,14 @@ def main():
                 sys.exit("record did not report a run dir")
             if mode == "feature-demo" and tts:
                 run([PY, HERE / "tts.py", rdir], capture=True)
-            run([PY, HERE / "edl.py", rdir, "--render", "final"])
-            v = subprocess.run([PY, HERE / "verify.py", rdir, "--video", "edited.mp4"], capture_output=True,
-                               text=True, encoding="utf-8", errors="replace")
-            print("\n".join(l for l in v.stdout.splitlines() if l.startswith(("FAIL", "WARN", "contact"))))
-            if v.returncode != 0:
-                sys.exit(f"verify failed: see {rdir / 'verify' / 'report.md'}")
+            variants = [["--no-theme"], []] if mode == "feature-demo" else [[]]
+            for extra in variants:          # feature-demo: plain captions first, then the project theme
+                run([PY, HERE / "edl.py", rdir, "--render", "final", *extra])
+                v = subprocess.run([PY, HERE / "verify.py", rdir, "--video", "edited.mp4"], capture_output=True,
+                                   text=True, encoding="utf-8", errors="replace")
+                print("\n".join(l for l in v.stdout.splitlines() if l.startswith(("FAIL", "WARN", "contact"))))
+                if v.returncode != 0:
+                    sys.exit(f"verify failed ({' '.join(extra) or 'themed'}): see {rdir / 'verify' / 'report.md'}")
             run([PY, HERE / "export.py", rdir / "edited.mp4", rdir / "final.mp4"])
             if mode == "bug-report":
                 run([PY, HERE / "redact.py", rdir], capture=True)

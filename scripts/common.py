@@ -139,6 +139,10 @@ def validate_storyboard(sb) -> list[str]:
                 errs.append(f"bug.{k} is required in bug-report mode")
         if not any(s.get("bug") for s in steps):
             errs.append("bug-report: mark the step where the bug shows with 'bug: true'")
+    if sb.get("theme") and sb.get("mode") != "feature-demo":
+        errs.append("'theme' applies to feature-demo only")
+    if sb.get("theme") is not None and not isinstance(sb.get("theme"), str):
+        errs.append("'theme' must be a theme name (clean, a personal theme) or a path to a theme YAML")
     if sb.get("profile") and sb.get("storage_state"):
         errs.append("use either 'profile' or 'storage_state', not both")
     if sb.get("channel") not in (None, "chrome", "chrome-beta", "msedge", "chromium"):

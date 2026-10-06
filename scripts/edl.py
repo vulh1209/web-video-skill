@@ -223,7 +223,7 @@ def make_plan(doc: dict, sb: dict, raw_dur: float, narration: dict | None, zoom:
         text = sb["steps"][s["i"]].get("caption", "")
         cap = {"i": s["i"], "n": j + 1, "text": text, "a": round(a, 3), "b": round(b, 3), "pos": pos}
         captions.append(cap)
-        if mode == "feature-demo":
+        if mode == "feature-demo" and not sb.get("theme"):   # themed captions sit below the frame
             rect = ov.caption_rect(f"{j + 1}. {text}", pos, W, H)
             for c in st_clicks:
                 bb = c.get("bbox")
@@ -267,7 +267,9 @@ def piecewise(ws: list[dict], key: str, var="it") -> str:
     return expr
 
 
-def zoom_filter(zooms: list[dict], W: int, H: int, zmax: float, ss: int) -> str:
+def zoom_filter(zooms: list[dict], W: int, H: int, zmax: float, ss: int, out: tuple[int, int] | None = None) -> str:
+    """Click zoom. `out` renders straight at another size (the theme frame) to avoid a second rescale."""
+    OW, OH = out or (W, H)
     ws = sorted(zooms, key=lambda z: z["a"])
     env = [f"clip(min((it-{z['a']:.3f})/{ZOOM_RAMP},({z['b']:.3f}-it)/{ZOOM_RAMP}),0,1)" for z in ws]
     m = env[0]
@@ -275,9 +277,9 @@ def zoom_filter(zooms: list[dict], W: int, H: int, zmax: float, ss: int) -> str:
         m = f"max({m},{e})"
     zexpr = f"1+{zmax - 1:.3f}*{m}"
     cx, cy = piecewise(ws, "cx"), piecewise(ws, "cy")
-    return (f"scale={W * ss}:{H * ss}:flags=lanczos,"
+    return (f"scale={OW * ss}:{OH * ss}:flags=lanczos,"
             f"zoompan=z='{zexpr}':x='clip(({cx})*iw-iw/zoom/2,0,iw-iw/zoom)'"
-            f":y='clip(({cy})*ih-ih/zoom/2,0,ih-ih/zoom)':d=1:s={W}x{H}:fps={FPS},setsar=1")
+            f":y='clip(({cy})*ih-ih/zoom/2,0,ih-ih/zoom)':d=1:s={OW}x{OH}:fps={FPS},setsar=1")
 
 
 def seg_chain(segs: list[dict], src: str, audio: bool = False) -> list[str]:
@@ -324,6 +326,8 @@ def build_graph(plan: dict, sb: dict, run: pathlib.Path, draft: bool, zmax: floa
         head += "," + ov.timestamp_filter()
     parts = [head + "[src]"] + seg_chain(segs, "src")
 
+    if mode == "feature-demo" and sb.get("theme"):
+        return themed_graph(plan, sb, run, draft, zmax, narration, parts)
     if plan["zooms"]:
         parts.append(f"[cat]{zoom_filter(plan['zooms'], W, H, zmax, 1 if draft else 2)}[zm]")
     else:
@@ -357,25 +361,90 @@ def build_graph(plan: dict, sb: dict, run: pathlib.Path, draft: bool, zmax: floa
     parts.append(f"[outv0]{tail}format=yuv420p[outv]")
 
     total = intro + total_body + outro
-    inputs = []
-    clips = (narration or {}).get("clips", [])
-    if clips and mode == "feature-demo":
-        caps = {c["i"]: c for c in plan["captions"]}
-        labels = []
-        for k, c in enumerate(clips, start=1):
-            if c["i"] not in caps:
-                continue
-            inputs.append(c["file"])
-            delay = int((intro + caps[c["i"]]["a"] + 0.15) * 1000)
-            d = c["duration"]
-            parts.append(f"[{len(inputs)}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                         f"afade=t=in:d=0.03,afade=t=out:st={max(0, d - 0.03):.3f}:d=0.03,"
-                         f"adelay={delay}:all=1[n{k}]")
-            labels.append(f"[n{k}]")
-        if labels:
-            parts.append("".join(labels) + f"amix=inputs={len(labels)}:normalize=0:dropout_transition=0,"
-                         f"apad,atrim=0:{total:.3f}[outa]")
-    return ";\n".join(parts), inputs, total
+    inputs, audio = narration_mix(plan, narration, intro, total) if mode == "feature-demo" else ([], [])
+    return ";\n".join(parts + audio), inputs, total
+
+
+def narration_mix(plan: dict, narration: dict | None, intro: float, total: float) -> tuple[list[str], list[str]]:
+    """Per-step narration clips delayed to their captions and mixed to [outa]."""
+    inputs, parts, labels = [], [], []
+    caps = {c["i"]: c for c in plan["captions"]}
+    for k, c in enumerate((narration or {}).get("clips", []), start=1):
+        if c["i"] not in caps:
+            continue
+        inputs.append(c["file"])
+        delay = int((intro + caps[c["i"]]["a"] + 0.15) * 1000)
+        d = c["duration"]
+        parts.append(f"[{len(inputs)}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                     f"afade=t=in:d=0.03,afade=t=out:st={max(0, d - 0.03):.3f}:d=0.03,"
+                     f"adelay={delay}:all=1[n{k}]")
+        labels.append(f"[n{k}]")
+    if labels:
+        parts.append("".join(labels) + f"amix=inputs={len(labels)}:normalize=0:dropout_transition=0,"
+                     f"apad,atrim=0:{total:.3f}[outa]")
+    return inputs, parts
+
+
+def still(path: str, duration: float, alpha: bool = False) -> str:
+    """A PNG layer as a video stream of `duration` seconds (movie source, so no extra -i input)."""
+    fmt = "rgba" if alpha else "yuv420p"
+    return (f"movie={path},loop=loop=-1:size=1:start=0,fps={FPS},trim=duration={duration:.3f},"
+            f"setpts=PTS-STARTPTS,format={fmt},setsar=1")
+
+
+def resolve_theme(sb: dict, run: pathlib.Path) -> dict:
+    """Theme names are built-in; relative paths resolve from the run, then the original storyboard folder."""
+    import theme as th
+    spec = str(sb["theme"])
+    base = run
+    if not th.theme_path(spec, run).exists():
+        meta = run / "meta.json"
+        sb_dir = load_json(meta).get("storyboard_dir") if meta.exists() else None
+        base = pathlib.Path(sb_dir) if sb_dir else run
+    return th.load_theme(spec, base)
+
+
+def themed_graph(plan: dict, sb: dict, run: pathlib.Path, draft: bool, zmax: float,
+                 narration: dict | None, parts: list[str]) -> tuple[str, list[str], float]:
+    """feature-demo on a designed canvas: framed recording, caption band, themed cards (scripts/theme.py)."""
+    import theme as th
+    W, H = plan["viewport"]
+    theme = resolve_theme(sb, run)
+    layers = th.render_layers(theme, (W, H), run / "theme", title=sb.get("title", ""), subtitle=sb.get("subtitle"),
+                              outro=sb.get("outro"), label=sb.get("theme_label", ""),
+                              captions=[(c["n"], c["text"]) for c in plan["captions"]])
+    files, lay = layers["files"], layers["layout"]
+    fx, fy, fw, fh = lay["frame"]
+    total_body = plan["body_duration"]
+    if plan["zooms"]:
+        parts.append(f"[cat]{zoom_filter(plan['zooms'], W, H, zmax, 1 if draft else 2, (fw, fh))}[rec]")
+    else:
+        parts.append(f"[cat]scale={fw}:{fh}:flags=lanczos,setsar=1[rec]")
+    parts.append(still(files["background"], total_body) + "[bg]")
+    parts.append(f"[bg][rec]overlay=x={fx}:y={fy}:shortest=1[b0]")
+    k = 0
+    for k, c in enumerate(plan["captions"], start=1):
+        a, b = c["a"], c["b"]
+        fade = (f",fade=t=in:st={a:.3f}:d=0.25:alpha=1"
+                f",fade=t=out:st={max(a, b - 0.25):.3f}:d=0.25:alpha=1")
+        cap = files["captions"][c["n"]]
+        parts.append(still(cap["file"], total_body, alpha=True) + fade + f"[c{k}]")
+        parts.append(f"[b{k - 1}][c{k}]overlay={cap['x']}:{cap['y']}:enable='{ov.between(a, b)}'[b{k}]")
+    parts.append(f"[b{k}]fade=t=in:d=0.3[body]")
+    intro = INTRO
+    outro = OUTRO if sb.get("outro") else 0.0
+    fades = ",fade=t=in:d=0.3,fade=t=out:st={st:.2f}:d=0.35"
+    parts.append(still(files["intro"], INTRO) + fades.format(st=INTRO - 0.35) + "[intro]")
+    if outro:
+        parts.append(still(files["outro"], OUTRO) + fades.format(st=OUTRO - 0.35) + "[outro]")
+        parts.append("[intro][body][outro]concat=n=3:v=1:a=0[outv0]")
+    else:
+        parts.append("[intro][body]concat=n=2:v=1:a=0[outv0]")
+    tail = "scale=-2:480:flags=bicubic," if draft else ""
+    parts.append(f"[outv0]{tail}format=yuv420p[outv]")
+    total = intro + total_body + outro
+    inputs, audio = narration_mix(plan, narration, intro, total)
+    return ";\n".join(parts + audio), inputs, total
 
 
 def checkpoints(plan: dict, intro: float, total: float) -> list[dict]:
@@ -483,6 +552,7 @@ def main():
     ap.add_argument("--zoom", type=float, default=1.5, help="max zoom on clicks (feature-demo), cap 1.5 advised")
     ap.add_argument("--no-zoom", action="store_true")
     ap.add_argument("--no-narration", action="store_true")
+    ap.add_argument("--no-theme", action="store_true", help="ignore the storyboard theme (plain captions)")
     ap.add_argument("--edit-only", type=pathlib.Path, metavar="INPUT")
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--mode", choices=["feature-demo", "bug-report"], default="feature-demo")
@@ -500,6 +570,8 @@ def main():
         if not p[k].exists():
             die(f"missing {p[k]}")
     sb = load_storyboard(p["storyboard"])
+    if a.no_theme:
+        sb = {k: v for k, v in sb.items() if k not in ("theme", "theme_label")}
     doc = load_json(p["events"])
     if doc.get("offset_method", "").startswith("none"):
         print("warning: video_offset unknown (see calibrate.py)", file=sys.stderr)

@@ -17,6 +17,10 @@ Built by `scripts/overlay.py`, assembled by `scripts/edl.py`. Every text goes th
 
 Zoom options: `--zoom 1.3` (gentler), `--no-zoom`. Above 1.5x the 1x recording and the DOM cursor blur. Many actions close together give a continuous zoom that pans between them; that is intended. If it feels busy, add `wait` between steps or use `--zoom 1.25`.
 
+## feature-demo with a theme
+
+With `theme:` in the storyboard (the project's own theme from `theme.py init`; see `references/themes.md`) the layout changes: the recording is scaled into a frame on a 1920x1080 designed canvas, captions move to a band under the frame (no collision warnings, nothing covers the app), and the intro/outro cards come from the theme. Click zoom still runs inside the frame. Layers are PNGs in `RUN/theme/`. See `references/themes.md`.
+
 ## bug-report
 
 | Element | Look | Timing |
