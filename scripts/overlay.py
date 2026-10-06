@@ -31,7 +31,7 @@ class Texts:
     def file(self, text: str) -> str:
         self.n += 1
         p = self.dir / f"{self.n:02d}.txt"
-        p.write_text(text, encoding="utf-8")
+        p.write_text(text, encoding="utf-8", newline="\n")   # CRLF would add blank lines in drawtext (Windows)
         return f"text/{p.name}"
 
 

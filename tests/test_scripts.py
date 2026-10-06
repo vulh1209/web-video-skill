@@ -210,6 +210,15 @@ class FfmpegCompat(unittest.TestCase):
             common._FF_MAJOR = old
 
 
+class TextFiles(unittest.TestCase):
+    def test_textfile_uses_lf_only(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            t = overlay.Texts(pathlib.Path(td))
+            rel = t.file("dòng 1\ndòng 2")
+            self.assertNotIn(b"\r", (pathlib.Path(td) / rel).read_bytes())
+
+
 class Srt(unittest.TestCase):
     def test_srt_format(self):
         s = overlay.srt([{"a": 1.5, "b": 62.25, "text": "Xin chào"}])
