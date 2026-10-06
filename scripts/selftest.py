@@ -4,7 +4,8 @@
 USAGE
   selftest.py [WORKDIR] [--no-tts] [--quick]
 Runs unit tests and lint, then for both modes: rehearse, record, (narration), edit final, verify,
-export, redact, report. --quick skips the bug-report pass. Default WORKDIR: a new temp folder.
+export, redact, report; then a signed-in take through a persistent browser profile (browser_profile.py).
+--quick runs only the feature-demo pass. Default WORKDIR: a new temp folder.
 Narration runs only when the Piper voice is installed (install_tts.py) or on macOS (`say`).
 Exit code 1 on the first failing stage.
 """
@@ -42,6 +43,45 @@ def free_port() -> int:
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+def profile_pass(work: pathlib.Path, port: int):
+    """Sign in once into a throwaway profile, then record without a login step."""
+    print("== profile (signed-in take)", flush=True)
+    os.environ["WEB_VIDEO_PROFILE_ROOT"] = str(work / "profiles")
+    sys.path.insert(0, str(HERE))
+    import yaml
+    import browser_profile as bp
+    from playwright.sync_api import sync_playwright
+    base = f"http://localhost:{port}"
+    bp.init_profile(bp.resolve("selftest"), "selftest", keychain="mock", channel="chromium")
+    with sync_playwright() as pw:
+        ctx = bp.open_context(pw, "selftest", None, headless=True)
+        page = ctx.new_page()
+        page.goto(base + "/login")
+        page.fill("#email", "demo@example.com")
+        page.fill("#password", "demo-pass")
+        page.click('[data-testid="sign-in"]')
+        page.wait_for_url(base + "/")
+        bp.save_state(ctx, bp.resolve("selftest"))   # what `login` does while the window is open
+        ctx.close()
+    run([PY, HERE / "browser_profile.py", "check", "selftest", base + "/", "--expect-status-url", base + "/api/me"],
+        capture=True)
+    sb = yaml.safe_load((ROOT / "assets" / "examples" / "bug-report.yaml").read_text(encoding="utf-8"))
+    sb["url"] = base
+    sb["steps"] = [{"caption": "Mở danh sách", "do": "goto /"}] + [s for s in sb["steps"] if not s.get("hidden")]
+    sbf = work / "profile-take.yaml"
+    sbf.write_text(yaml.safe_dump(sb, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    run([PY, HERE / "record.py", sbf, "--rehearse", "--profile", "selftest"], cwd=work, capture=True)
+    out = run([PY, HERE / "record.py", sbf, "--slug", "profile-take", "--root", work / "video-out",
+               "--profile", "selftest"], cwd=work, capture=True).stdout
+    rdir = pathlib.Path(next(l.split("run dir: ", 1)[1].strip() for l in out.splitlines() if l.startswith("run dir: ")))
+    run([PY, HERE / "edl.py", rdir, "--render", "draft"], capture=True)
+    v = subprocess.run([PY, HERE / "verify.py", rdir], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if v.returncode != 0:
+        sys.exit(f"verify failed for the profile take: see {rdir / 'verify' / 'report.md'}")
+    run([PY, HERE / "browser_profile.py", "delete", "selftest"], capture=True)
+    print("profile take OK", flush=True)
 
 
 def main():
@@ -101,6 +141,8 @@ def main():
             if mode == "bug-report":
                 run([PY, HERE / "redact.py", rdir], capture=True)
             run([PY, HERE / "report.py", rdir], capture=True)
+        if not a.quick:
+            profile_pass(work, port)
     finally:
         server.terminate()
         log.close()

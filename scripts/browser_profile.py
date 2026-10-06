@@ -11,6 +11,9 @@ USAGE
 
 A profile is a Chromium user-data dir under ~/.cache/web-video/profiles/NAME (WEB_VIDEO_PROFILE_ROOT
 overrides). record.py uses it with `profile: NAME` in the storyboard or `--profile NAME`.
+Every profile made here carries a `web-video-profile.json` marker; `delete` and `import --replace`
+only remove folders inside the profile root or folders with that marker. `login` also snapshots cookies
+to web-video-state.json every 2 s, because Chromium drops session cookies when the window closes.
 
 Why a copy and not the live Chrome profile: Chrome locks a profile while it runs, and Chrome 136+
 refuses automation on its default user-data dir. `import` copies only cookies, site storage and the
@@ -21,6 +24,7 @@ Treat a profile like a password: it holds live sessions. Delete it when the vide
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import pathlib
@@ -28,9 +32,14 @@ import shutil
 import sys
 
 CHANNELS = ("chrome", "chrome-beta", "msedge", "chromium")
-# Files and folders that carry sign-in state. Caches, history and extensions stay behind.
+# Files and folders that carry sign-in state. Caches, history, extensions, saved passwords ("Login Data")
+# and autofill/payment data ("Web Data") stay behind: a take must never autofill personal data on camera.
 IMPORT_ITEMS = ("Cookies", "Cookies-journal", "Network", "Local Storage", "Session Storage", "IndexedDB",
-                "Service Worker", "Preferences", "Secure Preferences", "Web Data", "Web Data-journal")
+                "Service Worker", "Preferences", "Secure Preferences")
+MARKER = "web-video-profile.json"
+LEGACY_MARKER = "web-video-source.json"
+MOCK_KEYCHAIN_FLAGS = ["--use-mock-keychain", "--password-store=basic"]
+STATE = "web-video-state.json"   # storage_state snapshot: Chromium does not persist session cookies on close
 
 
 def profile_root() -> pathlib.Path:
@@ -44,6 +53,80 @@ def resolve(profile: str) -> pathlib.Path:
     if profile in (".", "..") or not profile.replace("-", "").replace("_", "").isalnum():
         raise SystemExit(f"error: profile name must be letters, digits, - or _: {profile!r}")
     return profile_root() / profile
+
+
+def read_marker(path: pathlib.Path) -> dict:
+    for name in (MARKER, LEGACY_MARKER):
+        f = path / name
+        if f.exists():
+            try:
+                return json.loads(f.read_text(encoding="utf-8"))
+            except ValueError:
+                return {}
+    return {}
+
+
+def init_profile(path: pathlib.Path, source: str, keychain: str = "real", channel: str | None = None) -> pathlib.Path:
+    """Create (or mark) a profile folder. keychain: 'real' for Chrome-imported or user sign-in profiles,
+    'mock' for throwaway test profiles that must not touch the OS keychain."""
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    meta = {"source": source, "keychain": keychain, "created": dt.datetime.now().isoformat(timespec="seconds")}
+    if channel:
+        meta["channel"] = channel
+    (path / MARKER).write_text(json.dumps(meta), encoding="utf-8")
+    return path
+
+
+def save_state(ctx, path: pathlib.Path) -> bool:
+    """Snapshot cookies (session cookies included) into the profile. Same sensitivity as the profile itself."""
+    try:
+        state = ctx.storage_state()
+    except Exception:
+        return False
+    tmp = path / (STATE + ".tmp")
+    tmp.write_text(json.dumps(state), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    tmp.replace(path / STATE)
+    return True
+
+
+def restore_state(ctx, path: pathlib.Path) -> int:
+    """Re-add saved cookies that the browser dropped (session cookies). Returns how many were added."""
+    f = path / STATE
+    if not f.exists():
+        return 0
+    try:
+        saved = json.loads(f.read_text(encoding="utf-8")).get("cookies", [])
+    except ValueError:
+        return 0
+    have = {(c["name"], c["domain"], c["path"]) for c in ctx.cookies()}
+    missing = [c for c in saved if (c["name"], c["domain"], c["path"]) not in have]
+    if missing:
+        ctx.add_cookies(missing)
+    return len(missing)
+
+
+def safe_to_remove(path: pathlib.Path) -> bool:
+    """Only folders this tool manages: inside the profile root, or carrying our marker."""
+    path = path.resolve()
+    root = profile_root().resolve()
+    if path == root or path == pathlib.Path.home().resolve() or len(path.parts) <= 2:
+        return False
+    return root in path.parents or (path / MARKER).exists() or (path / LEGACY_MARKER).exists()
+
+
+def remove_profile(path: pathlib.Path):
+    if not safe_to_remove(path):
+        raise SystemExit(f"error: refusing to delete {path}: not a web-video profile "
+                         f"(outside {profile_root()} and no {MARKER})")
+    shutil.rmtree(path)
 
 
 def chrome_user_data_dir() -> pathlib.Path:
@@ -63,9 +146,10 @@ def chrome_profiles() -> list[tuple[str, str, str]]:
     return sorted((d, v.get("name", ""), v.get("user_name", "")) for d, v in cache.items())
 
 
-def launch_options(channel: str | None, *, interactive: bool) -> dict:
-    """Arguments for launch_persistent_context. Keep the real keychain so copied cookies decrypt."""
-    ignore = ["--use-mock-keychain", "--password-store=basic"]
+def launch_options(channel: str | None, *, interactive: bool, keychain: str = "real") -> dict:
+    """Arguments for launch_persistent_context. A 'real' keychain profile drops Playwright's mock keychain
+    so cookies copied from Chrome decrypt with the user's key; a 'mock' one keeps the defaults."""
+    ignore = list(MOCK_KEYCHAIN_FLAGS) if keychain == "real" else []
     args = []
     if interactive:
         # Google sign-in refuses windows that announce automation.
@@ -92,31 +176,44 @@ def open_context(pw, profile: str, channel: str | None, *, headless: bool, inter
     path = resolve(profile)
     if not path.exists():
         raise SystemExit(f"error: profile {profile!r} not found at {path}; run browser_profile.py login or import first")
-    channel = channel or default_channel()
-    return pw.chromium.launch_persistent_context(str(path), headless=headless,
-                                                 **launch_options(channel, interactive=interactive), **ctx_kw)
+    marker = read_marker(path)
+    channel = channel or marker.get("channel") or default_channel()
+    opts = launch_options(channel, interactive=interactive, keychain=marker.get("keychain", "real"))
+    ctx = pw.chromium.launch_persistent_context(str(path), headless=headless, **opts, **ctx_kw)
+    restore_state(ctx, path)
+    return ctx
 
 
 def cmd_login(a) -> int:
     from playwright.sync_api import sync_playwright
     path = resolve(a.name)
-    path.mkdir(parents=True, exist_ok=True)
-    os.chmod(path, 0o700)
+    if not read_marker(path):
+        init_profile(path, "login")
     with sync_playwright() as pw:
         ctx = open_context(pw, a.name, a.channel, headless=False, interactive=True, no_viewport=True)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto(a.url)
         print(f"Sign in in the browser window, then close the window to save profile {a.name!r}.", flush=True)
-        try:
-            ctx.wait_for_event("close", timeout=0)
-        except Exception:
-            pass
+        closed = []
+        ctx.on("close", lambda _: closed.append(True))
+        while not closed:                        # snapshot every 2 s: after the window closes it is too late
+            save_state(ctx, path)
+            try:
+                page.wait_for_timeout(2000) if not page.is_closed() else ctx.wait_for_event("close", timeout=2000)
+            except Exception:
+                if not ctx.pages:
+                    break
+            if not ctx.pages:
+                break
+            page = ctx.pages[0]
     print(f"saved profile: {path}")
     return 0
 
 
 def cmd_import(a) -> int:
     source_root = chrome_user_data_dir()
+    if a.from_chrome in ("", ".", "..") or any(c in a.from_chrome for c in "/\\"):
+        raise SystemExit(f"error: --from-chrome takes a profile folder name such as 'Default' or 'Profile 1'")
     source = source_root / a.from_chrome
     if not (source / "Preferences").exists():
         known = ", ".join(f"{d} ({u or n})" for d, n, u in chrome_profiles()) or "none found"
@@ -125,9 +222,9 @@ def cmd_import(a) -> int:
     if target.exists() and any(target.iterdir()) and not a.replace:
         raise SystemExit(f"error: {target} exists; pass --replace to overwrite it")
     if target.exists():
-        shutil.rmtree(target)
+        remove_profile(target)
+    init_profile(target, f"chrome:{a.from_chrome}")
     (target / "Default").mkdir(parents=True)
-    os.chmod(target, 0o700)
     # Local State holds the cookie encryption key wrapper (Windows) and profile metadata.
     shutil.copy2(source_root / "Local State", target / "Local State")
     copied = []
@@ -139,7 +236,6 @@ def cmd_import(a) -> int:
         elif src.is_file():
             shutil.copy2(src, target / "Default" / item)
             copied.append(item)
-    (target / "web-video-source.json").write_text(json.dumps({"chrome_profile": a.from_chrome}))
     print(f"imported {len(copied)} item(s) from Chrome {a.from_chrome!r} into {target}")
     print("Check it with: browser_profile.py check NAME URL. If the site shows you signed out, use browser_profile.py login.")
     return 0
@@ -163,10 +259,10 @@ def cmd_check(a) -> int:
 
 def cmd_list(_a) -> int:
     root = profile_root()
-    for p in sorted(root.iterdir()) if root.exists() else []:
-        meta = p / "web-video-source.json"
-        source = json.loads(meta.read_text()).get("chrome_profile") if meta.exists() else "login"
-        print(f"{p.name:24} {source:16} {p}")
+    for p in sorted(x for x in root.iterdir() if x.is_dir()) if root.exists() else []:
+        m = read_marker(p)
+        source = m.get("source") or (f"chrome:{m['chrome_profile']}" if m.get("chrome_profile") else "?")
+        print(f"{p.name:24} {source:20} {m.get('keychain', 'real'):5} {p}")
     return 0
 
 
@@ -181,7 +277,7 @@ def cmd_delete(a) -> int:
     if not path.exists():
         print(f"no profile at {path}")
         return 0
-    shutil.rmtree(path)
+    remove_profile(path)
     print(f"deleted {path}")
     return 0
 

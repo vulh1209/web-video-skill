@@ -219,6 +219,131 @@ class TextFiles(unittest.TestCase):
             self.assertNotIn(b"\r", (pathlib.Path(td) / rel).read_bytes())
 
 
+class BrowserProfile(unittest.TestCase):
+    """browser_profile.py without a browser: naming, launch flags, import filtering, delete safety."""
+
+    def setUp(self):
+        import importlib
+        import os
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self.root = self.base / "profiles"
+        self._env = os.environ.get("WEB_VIDEO_PROFILE_ROOT")
+        os.environ["WEB_VIDEO_PROFILE_ROOT"] = str(self.root)
+        import browser_profile
+        self.bp = importlib.reload(browser_profile)
+        self.chrome = self.base / "Chrome"
+        self.bp.chrome_user_data_dir = lambda: self.chrome
+
+    def tearDown(self):
+        import os
+        if self._env is None:
+            os.environ.pop("WEB_VIDEO_PROFILE_ROOT", None)
+        else:
+            os.environ["WEB_VIDEO_PROFILE_ROOT"] = self._env
+        self.tmp.cleanup()
+
+    def fake_chrome(self):
+        prof = self.chrome / "Profile 1"
+        prof.mkdir(parents=True)
+        (self.chrome / "Local State").write_text(json.dumps({"profile": {"info_cache": {
+            "Profile 1": {"name": "Work", "user_name": "qa@example.com"}}}}), encoding="utf-8")
+        for f in ("Preferences", "Cookies", "Login Data", "Web Data", "History"):
+            (prof / f).write_text("x", encoding="utf-8")
+        (prof / "Local Storage").mkdir()
+        (prof / "Local Storage" / "leveldb").write_text("x", encoding="utf-8")
+
+    def run_import(self, name, src="Profile 1", replace=False):
+        import argparse
+        return self.bp.cmd_import(argparse.Namespace(name=name, from_chrome=src, replace=replace))
+
+    def test_resolve_names_and_paths(self):
+        self.assertEqual(self.bp.resolve("demo_1"), self.root / "demo_1")
+        for bad in ("..", ".", "a b", "a;b"):
+            with self.assertRaises(SystemExit):
+                self.bp.resolve(bad)
+        self.assertEqual(self.bp.resolve(str(self.base / "x")), (self.base / "x").resolve())
+
+    def test_launch_flags_by_keychain(self):
+        real = self.bp.launch_options("chrome", interactive=False)
+        self.assertIn("--use-mock-keychain", real["ignore_default_args"])
+        self.assertEqual(real["channel"], "chrome")
+        self.assertNotIn("--enable-automation", real["ignore_default_args"])
+        mock = self.bp.launch_options("chromium", interactive=False, keychain="mock")
+        self.assertEqual(mock["ignore_default_args"], [])
+        self.assertNotIn("channel", mock)
+        login = self.bp.launch_options(None, interactive=True)
+        self.assertIn("--enable-automation", login["ignore_default_args"])
+
+    def test_chrome_profiles_listing(self):
+        self.fake_chrome()
+        self.assertEqual(self.bp.chrome_profiles(), [("Profile 1", "Work", "qa@example.com")])
+
+    def test_import_copies_only_session_state(self):
+        self.fake_chrome()
+        self.run_import("work")
+        d = self.root / "work" / "Default"
+        self.assertTrue((d / "Cookies").exists() and (d / "Local Storage" / "leveldb").exists())
+        for kept_out in ("Login Data", "Web Data", "History"):
+            self.assertFalse((d / kept_out).exists(), kept_out)
+        self.assertTrue((self.root / "work" / "Local State").exists())
+        self.assertEqual(self.bp.read_marker(self.root / "work")["source"], "chrome:Profile 1")
+        with self.assertRaises(SystemExit):                 # exists, no --replace
+            self.run_import("work")
+        self.run_import("work", replace=True)
+
+    def test_import_rejects_traversal(self):
+        self.fake_chrome()
+        for bad in ("../Chrome", "..", "a/b"):
+            with self.assertRaises(SystemExit):
+                self.run_import("x", src=bad)
+
+    def test_delete_refuses_foreign_folders(self):
+        import argparse
+        foreign = self.base / "important"
+        foreign.mkdir()
+        (foreign / "keep.txt").write_text("x", encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            self.bp.cmd_delete(argparse.Namespace(name=str(foreign)))
+        self.assertTrue((foreign / "keep.txt").exists())
+        self.assertFalse(self.bp.safe_to_remove(pathlib.Path.home()))
+        marked = self.bp.init_profile(self.base / "elsewhere", "test", "mock")
+        self.bp.cmd_delete(argparse.Namespace(name=str(marked)))
+        self.assertFalse(marked.exists())
+        self.bp.init_profile(self.root / "inroot", "login")
+        self.bp.cmd_delete(argparse.Namespace(name="inroot"))
+        self.assertFalse((self.root / "inroot").exists())
+
+    def test_restore_state_adds_only_missing_cookies(self):
+        prof = self.bp.init_profile(self.root / "p", "test", "mock")
+        (prof / self.bp.STATE).write_text(json.dumps({"cookies": [
+            {"name": "session", "value": "s1", "domain": "localhost", "path": "/"},
+            {"name": "theme", "value": "dark", "domain": "localhost", "path": "/"}]}), encoding="utf-8")
+
+        class Ctx:
+            added = []
+            def cookies(self):
+                return [{"name": "theme", "value": "light", "domain": "localhost", "path": "/"}]
+            def add_cookies(self, cs):
+                self.added.extend(cs)
+        ctx = Ctx()
+        self.assertEqual(self.bp.restore_state(ctx, prof), 1)
+        self.assertEqual([c["name"] for c in ctx.added], ["session"])     # live value wins for existing ones
+
+    def test_list_tolerates_legacy_and_unknown(self):
+        import contextlib
+        import io
+        (self.root / "legacy").mkdir(parents=True)
+        (self.root / "legacy" / "web-video-source.json").write_text('{"chrome_profile": "Default"}', encoding="utf-8")
+        (self.root / "bare").mkdir()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.bp.cmd_list(None)
+        self.assertIn("chrome:Default", out.getvalue())
+        self.assertIn("bare", out.getvalue())
+
+
 class Srt(unittest.TestCase):
     def test_srt_format(self):
         s = overlay.srt([{"a": 1.5, "b": 62.25, "text": "Xin chào"}])

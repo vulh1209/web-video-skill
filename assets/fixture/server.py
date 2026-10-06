@@ -35,6 +35,9 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/login"):
             return self.send(200, (HERE / "login.html").read_text())
+        if self.path.startswith("/api/me"):
+            return self.send(200 if self.authed() else 401, '{"ok":%s}' % ("true" if self.authed() else "false"),
+                             "application/json")
         if self.path.startswith("/api/invoices"):
             return self.send(200, json.dumps(INVOICES), "application/json")
         if not self.authed():

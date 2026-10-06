@@ -46,6 +46,16 @@ Rules and limits:
 - `login` removes `--enable-automation` and sets `--disable-blink-features=AutomationControlled`, because
   Google sign-in rejects windows that announce automation. Takes keep the normal flags.
 - The profile opens with a blank or restored tab; record.py closes it and records its own page.
+- `import` copies cookies, site storage and preferences only. It never copies saved passwords (`Login Data`),
+  autofill or payment data (`Web Data`), history or extensions, so a take cannot autofill personal data on camera.
+- Session cookies (no expiry) are not written to disk when Chromium closes. `login` snapshots the cookies
+  into `web-video-state.json` inside the profile every 2 s while the window is open, and every later launch
+  re-adds the cookies the browser dropped. Wait a couple of seconds after signing in before closing the window.
+- Each profile has a `web-video-profile.json` marker (source, keychain mode, channel). `delete` and
+  `import --replace` refuse any folder outside the profile root that lacks it, so a mistyped path cannot wipe data.
+- Keychain modes: `real` (default; imported or user sign-in, decrypts with the OS key) and `mock` (throwaway test
+  profiles; never touches the OS keychain). `selftest.py` signs a `mock` profile into the fixture app and records
+  a take with `--profile` and no login step.
 - `meta.json` stores only the profile name. HAR and trace still contain cookies: run `redact.py` before
   sharing, and `delete` the profile when the video is done.
 

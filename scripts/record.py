@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import pathlib
 import shutil
 import sys
@@ -386,6 +387,8 @@ def main():
     storage = sb.get("storage_state")
     storage = str((sb_dir / storage).resolve()) if storage else None
     profile = a.profile or sb.get("profile")
+    if not a.profile and profile and ("/" in profile or "\\" in profile) and not os.path.isabs(os.path.expanduser(profile)):
+        profile = str((sb_dir / profile).resolve())          # storyboard paths are relative to the storyboard
     channel = a.channel or sb.get("channel")
     if profile and storage:
         die("use either a profile or storage_state, not both")
