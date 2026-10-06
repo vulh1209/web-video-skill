@@ -11,6 +11,7 @@ import overlay  # noqa: E402
 from common import FPS, snap, validate_storyboard  # noqa: E402
 from record import is_secret, parse_action, step_actions  # noqa: E402
 from redact import MASK, Redactor, literal_pass  # noqa: E402
+import theme  # noqa: E402
 
 
 def on_grid(x):
@@ -343,6 +344,243 @@ class BrowserProfile(unittest.TestCase):
         self.assertIn("chrome:Default", out.getvalue())
         self.assertIn("bare", out.getvalue())
 
+
+class Theme(unittest.TestCase):
+    """theme.py: loading, validation, layout, layers. Rendering tests skip when no usable font exists."""
+
+    def setUp(self):
+        import importlib
+        import os
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self.tmp.name)
+        self._env = os.environ.get("WEB_VIDEO_THEME_DIR")
+        os.environ["WEB_VIDEO_THEME_DIR"] = str(self.base / "personal")
+        self.th = importlib.reload(theme)
+
+    def tearDown(self):
+        import os
+        if self._env is None:
+            os.environ.pop("WEB_VIDEO_THEME_DIR", None)
+        else:
+            os.environ["WEB_VIDEO_THEME_DIR"] = self._env
+        self.tmp.cleanup()
+
+    def write(self, name, text, folder=None):
+        d = folder or self.base
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / name
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def fonts_or_skip(self, t):
+        try:
+            self.th.font_file(t, "display")
+        except SystemExit:
+            self.skipTest("no display font on this machine")
+
+    def test_builtin_base_is_neutral(self):
+        t = self.th.load_theme("clean")
+        for k in ("brand", "seal_glyph", "watermark_glyph", "vertical_note"):
+            self.assertEqual(t[k], "", k)
+        self.assertEqual(t["numerals"], "arabic")
+        self.assertEqual([n for n, origin in self.th.theme_names() if origin == "built-in"], ["clean"])
+
+    def test_extends_overrides_only_given_keys(self):
+        p = self.write("brand.yaml", "extends: clean\nbrand: ACME\ncolors:\n  seal: '#004488'\n")
+        t = self.th.load_theme(str(p))
+        self.assertEqual((t["brand"], t["colors"]["seal"]), ("ACME", "#004488"))
+        self.assertEqual(t["colors"]["paper"], "#F7F7F5")      # inherited from the base
+        self.assertEqual(t["name"], "brand")
+
+    def test_personal_theme_dir_wins_over_builtin_and_is_listed(self):
+        self.write("clean.yaml", "extends: " + str(self.th.THEMES / "clean.yaml") + "\nbrand: MINE\n",
+                   self.base / "personal")
+        self.assertEqual(self.th.load_theme("clean")["brand"], "MINE")
+        self.assertIn(("clean", f"personal ({self.base / 'personal'})"), self.th.theme_names())
+
+    def test_validation_reports_every_problem(self):
+        p = self.write("bad.yaml", "extends: clean\ncanvas: [1921, 1080]\ncolors:\n  seal: red\n"
+                                   "numerals: roman\n")
+        with self.assertRaises(SystemExit) as cm:
+            self.th.load_theme(str(p))
+        msg = str(cm.exception)
+        for part in ("canvas must be", "colors.seal must be", "numerals must be"):
+            self.assertIn(part, msg)
+
+    def test_extends_cycle_stops(self):
+        self.write("a.yaml", "extends: b.yaml\n")
+        self.write("b.yaml", "extends: a.yaml\n")
+        with self.assertRaises(SystemExit):
+            self.th.load_theme(str(self.base / "a.yaml"))
+
+    def test_hanzi_numerals_need_a_hanzi_font(self):
+        p = self.write("h.yaml", "extends: clean\nnumerals: hanzi\n")
+        with self.assertRaisesRegex(SystemExit, "fonts.hanzi"):
+            self.th.load_theme(str(p))
+
+    def test_layout_keeps_aspect_and_leaves_a_caption_band(self):
+        t = self.th.load_theme("clean")
+        for vp in ((1280, 720), (1440, 900), (1280, 800)):
+            fx, fy, fw, fh = self.th.layout(t, vp)["frame"]
+            self.assertAlmostEqual(fw / fh, vp[0] / vp[1], places=2)
+            self.assertTrue(fw % 2 == 0 and fh % 2 == 0 and fx % 2 == 0)
+            self.assertLess(self.th.layout(t, vp)["band_top"] + t["caption"]["size"], t["canvas"][1])
+
+    def test_layout_shrinks_wide_frames_and_rejects_impossible_ones(self):
+        t = self.th.load_theme(str(self.write("wide.yaml", "extends: clean\nframe:\n  width: 1900\n  top: 60\n")))
+        for vp in ((1280, 720), (1024, 768)):
+            lay = self.th.layout(t, vp)
+            fx, fy, fw, fh = lay["frame"]
+            self.assertLessEqual(lay["band_top"] + t["caption"]["size"], t["canvas"][1])
+            self.assertAlmostEqual(fw / fh, vp[0] / vp[1], places=2)
+        low = self.th.load_theme(str(self.write("low.yaml", "extends: clean\nframe:\n  top: 800\n")))
+        with self.assertRaisesRegex(SystemExit, "caption band"):
+            self.th.layout(low, (1280, 720))
+
+    def test_numerals(self):
+        self.assertEqual([self.th.numeral(n, "hanzi") for n in (1, 8, 10, 12, 20)], ["一", "八", "十", "十二", "二十"])
+        self.assertEqual(self.th.numeral(3, "arabic"), "03")
+        self.assertEqual(self.th.numeral(120, "hanzi"), "120")
+
+    def test_layers_render_and_captions_are_cropped(self):
+        t = self.th.load_theme("clean")
+        self.fonts_or_skip(t)
+        res = self.th.render_layers(t, (1280, 720), self.base / "out" / "theme", title="Tạo hoá đơn mới",
+                                    subtitle="Hướng dẫn", outro="Xong!", label="v2.3",
+                                    captions=[(1, "Bấm Lưu"), (2, "Nhập khách hàng và số tiền " * 3)])
+        from PIL import Image
+        cw, ch = t["canvas"]
+        for key in ("background", "intro", "outro"):
+            with Image.open(self.base / "out" / res["files"][key]) as im:
+                self.assertEqual(im.size, (cw, ch))
+        for cap in res["files"]["captions"].values():
+            with Image.open(self.base / "out" / cap["file"]) as f:
+                im = f.copy()
+            self.assertLess(im.height, ch // 4)                       # cropped to the caption band
+            self.assertTrue(0 <= cap["x"] and cap["x"] + im.width <= cw and cap["y"] + im.height <= ch)
+            self.assertTrue(im.width % 2 == 0 and im.height % 2 == 0)
+
+    def test_long_caption_shrinks_to_fit(self):
+        t = self.th.load_theme("clean")
+        self.fonts_or_skip(t)
+        lay = self.th.layout(t, (1280, 720))
+        img = self.th.caption(t, lay, 7, "Một chú thích rất dài để kiểm tra việc thu nhỏ chữ cho vừa khung " * 2)
+        x0, _, x1, _ = img.getbbox()
+        self.assertGreaterEqual(x0, int(t["canvas"][0] * 0.04))
+        self.assertLessEqual(x1, int(t["canvas"][0] * 0.96))
+
+    def test_vietnamese_glyphs_in_base_font(self):
+        t = self.th.load_theme("clean")
+        self.fonts_or_skip(t)
+        f = self.th.Fonts(t)("display", 40)
+        self.assertTrue(all(self.th.has_glyph(f, c) for c in "ạảấầẩẫậắằẳẵặđơưộợ"))
+
+    def test_storyboard_rules(self):
+        base = {"mode": "feature-demo", "url": "http://x", "steps": [{"caption": "a", "do": "wait 1"}]}
+        self.assertEqual(validate_storyboard({**base, "theme": "clean"}), [])
+        bug = {**base, "mode": "bug-report", "theme": "clean", "bug": {"expected": "e", "actual": "a"},
+               "steps": [{"caption": "a", "do": "wait 1", "bug": True}]}
+        self.assertIn("'theme' applies to feature-demo only", validate_storyboard(bug))
+
+
+class ThemeInit(unittest.TestCase):
+    """theme_init: a project's design becomes the video theme (colours, fonts, brand, sources)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = pathlib.Path(self.tmp.name)
+        import theme_init
+        self.ti = theme_init
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def put(self, rel, text):
+        p = self.repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    def test_parse_color_forms(self):
+        pc = self.ti.parse_color
+        self.assertEqual(pc("#abc"), "#AABBCC")
+        self.assertEqual(pc("#11223344"), "#112233")
+        self.assertEqual(pc("rgb(37, 99, 235)"), "#2563EB")
+        self.assertEqual(pc("0 0% 100%"), "#FFFFFF")                  # shadcn HSL triplet
+        self.assertEqual(pc("hsl(0, 100%, 50%)"), "#FF0000")
+        self.assertIsNone(pc("var(--primary)"))
+
+    def test_canvas_is_one_step_from_the_app_background(self):
+        light, dark = self.ti.canvas_from("#FFFFFF"), self.ti.canvas_from("#0B0F14")
+        self.assertTrue(1.05 < self.ti.contrast("#FFFFFF", light) < 1.3)
+        self.assertTrue(1.05 < self.ti.contrast("#0B0F14", dark) < 1.6)
+
+    def test_shadcn_css_variables_and_brand(self):
+        self.put("package.json", json.dumps({"name": "@acme/billing-portal", "dependencies": {"@fontsource/inter": "5"}}))
+        self.put("src/globals.css", """:root { --background: 0 0% 100%; --foreground: 222.2 84% 4.9%;
+            --primary: 221.2 83.2% 53.3%; --muted: 210 40% 96.1%; --border: 214.3 31.8% 91.4%; }
+            .dark { --background: 222.2 84% 4.9%; --foreground: 210 40% 98%; }""")
+        self.put("node_modules/x/evil.css", ":root { --primary: #FF00FF; }")   # never scanned
+        t, sources, notes = self.ti.build_theme(self.repo)
+        self.assertEqual(t["extends"], "clean")
+        self.assertEqual(t["colors"]["paper"], self.ti.canvas_from("#FFFFFF"))   # light palette, not .dark
+        self.assertTrue(self.ti.luminance(t["colors"]["ink"]) < 0.05)
+        self.assertNotEqual(t["colors"]["seal"], "#FF00FF")
+        self.assertGreater(self.ti.saturation(t["colors"]["seal"]), 0.5)
+        self.assertEqual(t["brand"], "BILLING PORTAL")
+        self.assertTrue(any("--primary" in s for s in sources))
+        self.assertTrue(any("Inter" in s for s in sources))
+
+    def test_tailwind_and_design_doc(self):
+        self.put("tailwind.config.js", "module.exports = { theme: { extend: { colors: { brand: '#0F766E', "
+                                       "surface: '#FAFAF7', ink: '#1F2937' }, fontFamily: { sans: ['Manrope', 'sans-serif'], "
+                                       "mono: ['JetBrains Mono'] } } } }")
+        self.put("docs/DESIGN.md", "# Design\nPrimary accent: brand #0F766E\n")
+        t, sources, notes = self.ti.build_theme(self.repo)
+        self.assertEqual(t["colors"]["seal"], "#0F766E")
+        self.assertEqual(t["colors"]["paper"], self.ti.canvas_from("#FAFAF7"))
+        self.assertEqual(t["colors"]["ink"], "#1F2937")
+        self.assertTrue(any("DESIGN.md" in s for s in sources))
+        self.assertTrue(any("Manrope" in s for s in sources))
+
+    def test_dark_app_keeps_dark_ground_and_checks_contrast(self):
+        self.put("app.css", ":root { --bg: #0B0F14; --text: #E6EDF3; --accent: #F59E0B; }")
+        t, _, notes = self.ti.build_theme(self.repo)
+        self.assertEqual(t["colors"]["paper"], self.ti.canvas_from("#0B0F14"))
+        self.assertGreater(self.ti.luminance(t["colors"]["paper"]), self.ti.luminance("#0B0F14"))
+        self.assertEqual(t["colors"]["seal_text"], "#111111")          # dark text on amber reads better
+        self.assertFalse(any("contrast" in n for n in notes))
+
+    def test_title_brand_and_unnamed_palette(self):
+        self.put("index.html", "<title>Invoices · Invoicer</title><style>body{background:#f9fafb;color:#111827}"
+                               ".btn{background:#2563eb}.btn2{background:#2563eb}</style>")
+        self.put("login.html", "<title>Sign in · Invoicer</title>")
+        t, sources, _ = self.ti.build_theme(self.repo)
+        self.assertEqual(t["brand"], "INVOICER")
+        self.assertEqual(t["colors"]["seal"], "#2563EB")
+        self.assertTrue(any("most used saturated" in s for s in sources))
+
+    def test_empty_repo_says_so(self):
+        t, sources, notes = self.ti.build_theme(self.repo)
+        self.assertNotIn("colors", t)
+        self.assertTrue(any("no design signals" in n for n in notes))
+
+    def test_init_cli_writes_a_valid_theme_and_refuses_overwrite(self):
+        import subprocess
+        import sys
+        self.put("styles.css", ":root { --primary: #7C3AED; --background: #FFFFFF; --foreground: #111111; }")
+        out = self.repo / "theme.yaml"
+        script = str(pathlib.Path(__file__).resolve().parent.parent / "scripts" / "theme.py")
+        r = subprocess.run([sys.executable, script, "init", "--repo", str(self.repo), "--out", str(out)],
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("# Sources:", text)
+        self.assertEqual(theme.load_theme(str(out))["colors"]["seal"], "#7C3AED")
+        r2 = subprocess.run([sys.executable, script, "init", "--repo", str(self.repo), "--out", str(out)],
+                            capture_output=True, text=True, encoding="utf-8")
+        self.assertNotEqual(r2.returncode, 0)
 
 class Srt(unittest.TestCase):
     def test_srt_format(self):

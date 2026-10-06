@@ -61,6 +61,13 @@ steps:
   - {caption: "Đăng nhập", hidden: true, do: ["goto /login", "fill #email | qa@example.com", "fill #password | ***", "click button[type=submit]", "wait_url **/"]}
   - {caption: "Bấm New invoice", do: "click [data-testid=new-invoice]"}
 ```
+**Look (feature-demo): the video must look like the project it shows.** Before writing the storyboard, read that project's design and turn it into a theme; never ship the neutral base silently:
+```bash
+$PY $WV/scripts/theme.py init --repo <project root> --out theme.yaml   # tokens, CSS vars, Tailwind, DESIGN.md, fonts, brand
+$PY $WV/scripts/theme.py check theme.yaml && $PY $WV/scripts/theme.py preview theme.yaml --out /tmp/look --title "..."
+```
+Read the `# Sources:` and notes in the draft, compare with the project's DESIGN.md / UI skill / logo, fix by hand, Read `/tmp/look/frame-preview.png` and `intro.png`, then set `theme: theme.yaml`. Only when the project has no design signals use `theme: clean`, and say so to the user. Details: `references/themes.md`.
+
 Quote any action that contains `#` (YAML comment). feature-demo: 30-90 s, max 8 visible steps, captions about benefits (≤ 12 words). bug-report: ≤ 60 s, mark the failing step `bug: true` (optional `bug_target:` selector for the red box).
 
 ## Step 2. Discover → Rehearse → Record
@@ -127,6 +134,7 @@ Set the bug-report **status** yourself (`confirmed` / `partially confirmed` / `n
 | `scripts/calibrate.py` | sync-flash offset (auto after a take); `--set` / `--show` |
 | `scripts/tts.py`, `scripts/install_tts.py` | per-step narration (Piper Vietnamese via `scripts/piper_worker.py`, or `say`; cloud only with `--allow-cloud`); one-time voice install |
 | `scripts/edl.py` | events → EDL → `filter.txt` → draft/final render; `--edit-only` for existing recordings |
+| `scripts/theme.py`, `scripts/theme_init.py` | project theme from the repo's design (`init`), `check`, `preview`, `fonts`, `list`; framed recording, caption band, themed cards |
 | `scripts/overlay.py` | caption, card, bug panel, red box, timestamp, SRT builders (imported by edl.py) |
 | `scripts/verify.py` | probe checks, frames, contact sheet, report |
 | `scripts/export.py` | size-targeted H.264 encode, optional GIF |
@@ -137,7 +145,7 @@ Set the bug-report **status** yourself (`confirmed` / `partially confirmed` / `n
 
 ## References
 
-`references/storyboard.md` (schema, actions, caption rules) · `references/record.md` (take, event log, limits) · `references/edl-ffmpeg.md` (EDL rules, ffmpeg recipes, edit-only) · `references/overlays.md` (captions, zoom, cards, bug panel, narration) · `references/verify.md` (checks, review loop) · `references/bug-report.md` (status, template, repro discipline) · `references/export.md` (platform limits, GIF, attach) · `references/failures.md` (symptom → fix) · `references/hifi-capture.md` (crisper capture for client demos)
+`references/storyboard.md` (schema, actions, caption rules) · `references/record.md` (take, event log, limits) · `references/edl-ffmpeg.md` (EDL rules, ffmpeg recipes, edit-only) · `references/overlays.md` (captions, zoom, cards, bug panel, narration) · `references/verify.md` (checks, review loop) · `references/bug-report.md` (status, template, repro discipline) · `references/export.md` (platform limits, GIF, attach) · `references/failures.md` (symptom → fix) · `references/hifi-capture.md` (crisper capture for client demos) · `references/themes.md` (designed background, project guideline → theme)
 
 ## Quick failure map
 

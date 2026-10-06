@@ -491,6 +491,7 @@ def main():
     save_json(paths["meta"], {"status": "aborted" if failed is not None else "ok",
                               "failed_step": None if failed is None else failed + 1,
                               "started_at": started, "url": sb["url"], "playwright": pw_version,
+                              "storyboard_dir": str(sb_dir),
                               "browser": browser_version, "storage_state": storage,
                               "profile": pathlib.Path(profile).name if profile else None, "raw_probe": probe,
                               "video_offset": off, "offset_method": method, "errors": len(errors)})
