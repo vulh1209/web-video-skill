@@ -44,7 +44,7 @@ $PY -c "import playwright, yaml, PIL; print('python deps ok')"
 $PY $WV/scripts/install_tts.py --check || $PY $WV/scripts/install_tts.py   # Vietnamese voice, ~200 MB in ~/.cache/web-video
 $PY $WV/scripts/selftest.py        # full pipeline on the bundled fixture app, both modes (~1 min)
 ```
-Missing something: print the install command and ask; never install silently. Python deps: `$PY -m pip install -r $WV/requirements.txt && $PY -m playwright install chromium`. ffmpeg: `brew install ffmpeg` (macOS), `winget install Gyan.FFmpeg` (Windows), `apt install ffmpeg` (Linux).
+Missing something: print the install command and ask; never install silently. Python deps: `$PY -m pip install -r $WV/requirements.txt && $PY -m playwright install chromium`. ffmpeg: `brew install ffmpeg-full` + its bin first on PATH (macOS; plain `ffmpeg` 8+ lacks drawtext), `winget install Gyan.FFmpeg` (Windows), `apt install ffmpeg` (Linux).
 If `video-out/<slug>/project.md` exists, read it and summarise the last run in one line before asking anything.
 
 ## Step 1. Inputs and storyboard

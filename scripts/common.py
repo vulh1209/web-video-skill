@@ -214,6 +214,18 @@ def ffmpeg_major() -> int:
     return _FF_MAJOR
 
 
+def require_filters(names=("drawtext", "zoompan")):
+    """Stop with an install hint when this ffmpeg lacks a filter we use (Homebrew's `ffmpeg` 8+ has no drawtext)."""
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace").stdout
+    have = {parts[1] for parts in (l.split() for l in out.splitlines()) if len(parts) > 2}
+    missing = [n for n in names if n not in have]
+    if missing:
+        hint = {"darwin": "brew install ffmpeg-full, then put $(brew --prefix ffmpeg-full)/bin first on PATH",
+                "win32": "winget install Gyan.FFmpeg (full build)"}.get(sys.platform, "install a full ffmpeg build")
+        die(f"this ffmpeg has no {', '.join(missing)} filter(s). {hint}")
+
+
 def filter_script_args(path: str) -> list[str]:
     """Read a filter graph from a file: `-/filter_complex FILE` on ffmpeg >= 7 (the old
     `-filter_complex_script` was deprecated in 7 and removed in 8); unknown versions use the new form."""

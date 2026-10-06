@@ -91,7 +91,8 @@ def install_deps():
     subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(REPO / "requirements.txt")], check=True)
     subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     if not shutil.which("ffmpeg"):
-        hint = {"Darwin": "brew install ffmpeg", "Windows": "winget install Gyan.FFmpeg"}.get(
+        hint = {"Darwin": "brew install ffmpeg-full (plain `ffmpeg` 8+ lacks drawtext)",
+                "Windows": "winget install Gyan.FFmpeg"}.get(
             platform.system(), "sudo apt install ffmpeg")
         print(f"ffmpeg not found: {hint}  (then open a new terminal)")
 

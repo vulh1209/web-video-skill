@@ -30,7 +30,7 @@ Collected from building this skill and from issues reported against other video 
 | zoom off target | wrong offset, or viewport differs from event `w/h` | calibrate; keep storyboard viewport = take viewport |
 | zoom shaky | integer pixel steps in zoompan | final render supersamples 2x (draft does not) |
 | boxes instead of letters | font lacks glyphs (Vietnamese, CJK) | `WEB_VIDEO_FONT=/path/to/font.ttf` |
-| `No such filter: drawtext/subtitles` | ffmpeg built without freetype/libass | `brew reinstall ffmpeg` (Homebrew default has both) or a static build |
+| `No such filter: drawtext` | ffmpeg built without freetype (Homebrew `ffmpeg` 8+) | macOS: `brew install ffmpeg-full` and put `$(brew --prefix ffmpeg-full)/bin` first on PATH; elsewhere a full build |
 | `Error splitting the argument list: Option not found` | ffmpeg 8 removed `-filter_complex_script` | use `-/filter_complex file`; edl.py picks the form by ffmpeg version |
 | filter error mentioning quotes or `:` | text in the filter string | edl.py always uses textfiles; do the same in hand edits |
 | micro-stutter | hold shorter than 0.2 s | edl.py skips those (`MIN_HOLD`) |

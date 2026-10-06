@@ -128,7 +128,7 @@ def storyboard_secrets(run: pathlib.Path) -> list[str]:
         return []
     import yaml
     from record import is_secret, step_actions
-    marked = set(json.loads(evp.read_text()).get("secret_selectors", [])) if evp.exists() else set()
+    marked = set(json.loads(evp.read_text(encoding="utf-8")).get("secret_selectors", [])) if evp.exists() else set()
     out = []
     for step in (yaml.safe_load(sbp.read_text(encoding="utf-8")) or {}).get("steps", []):
         try:

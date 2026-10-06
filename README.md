@@ -23,7 +23,7 @@ The take logs every step, click, keystroke and error with a timestamp. The edito
 ## Requirements
 
 - Python 3.10+
-- ffmpeg with `drawtext`, `zoompan` and `subtitles`. Get it with `brew install ffmpeg` (macOS), `winget install Gyan.FFmpeg` (Windows) or `sudo apt install ffmpeg` (Linux).
+- ffmpeg with `drawtext` and `zoompan`. On macOS use `brew install ffmpeg-full` and put `$(brew --prefix ffmpeg-full)/bin` first on PATH; Homebrew's plain `ffmpeg` 8+ has no `drawtext`. On Windows use `winget install Gyan.FFmpeg`, on Linux `sudo apt install ffmpeg`.
 - Python packages from `requirements.txt`: Playwright, PyYAML, Pillow. Chromium is installed through Playwright.
 - Optional: the local Vietnamese voice (about 200 MB, downloaded by `install_tts.py`).
 

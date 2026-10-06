@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import overlay as ov  # noqa: E402
-from common import (FPS, die, filter_script_args, link_or_copy, load_json, load_storyboard, need, probe_summary,  # noqa: E402
+from common import (FPS, die, filter_script_args, link_or_copy, require_filters, load_json, load_storyboard, need, probe_summary,  # noqa: E402
                     run_paths, save_json, snap)
 
 LEAD = 0.5                     # seconds kept before the first visible step
@@ -488,6 +488,7 @@ def main():
     ap.add_argument("--mode", choices=["feature-demo", "bug-report"], default="feature-demo")
     a = ap.parse_args()
     need("ffmpeg")
+    require_filters()
     if a.edit_only:
         if not a.out:
             die("--edit-only needs --out NEW_DIR")
