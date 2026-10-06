@@ -171,7 +171,7 @@ def save_json(p, data):
 def ffprobe(path) -> dict:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or f"ffprobe failed on {path}")
     return json.loads(out.stdout)
@@ -197,7 +197,7 @@ def probe_summary(path) -> dict:
 def run_ffmpeg(args: list[str], quiet: bool = True):
     """Run ffmpeg with an argv list (never a shell string)."""
     cmd = ["ffmpeg", "-hide_banner", "-y"] + (["-v", "error"] if quiet else []) + args
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError("ffmpeg failed:\n" + " ".join(cmd) + "\n" + r.stderr[-3000:])
     return r

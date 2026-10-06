@@ -66,7 +66,7 @@ def main():
             continue
         if "USAGE" not in doc.group(1):
             fails.append(f"{s.name}: docstring has no USAGE section")
-        r = subprocess.run([sys.executable, str(s), "--help"], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([sys.executable, str(s), "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         if r.returncode != 0:
             fails.append(f"{s.name} --help exited {r.returncode}: {r.stderr.strip()[-200:]}")
     for s in sorted((root / "scripts").glob("*.sh")):

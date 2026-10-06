@@ -114,7 +114,7 @@ def to_m4a(src: pathlib.Path, out: pathlib.Path):
 def say(text: str, out: pathlib.Path, voice: str, rate: int):
     if not shutil.which("say"):
         die("`say` is macOS only; use --provider piper (install_tts.py)")
-    voices = subprocess.run(["say", "-v", "?"], capture_output=True, text=True).stdout
+    voices = subprocess.run(["say", "-v", "?"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     if not any(line.split()[0] == voice for line in voices.splitlines() if line.strip()):
         die(f"voice '{voice}' not installed. System Settings > Accessibility > Spoken Content > Manage Voices")
     with tempfile.TemporaryDirectory() as td:

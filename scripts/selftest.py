@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--no-tts", action="store_true")
     ap.add_argument("--quick", action="store_true")
     a = ap.parse_args()
-    work = a.workdir or pathlib.Path(tempfile.mkdtemp(prefix="web-video-selftest-"))
+    work = (a.workdir or pathlib.Path(tempfile.mkdtemp(prefix="web-video-selftest-"))).resolve()
     work.mkdir(parents=True, exist_ok=True)
     os.environ["PYTHONIOENCODING"] = "utf-8"
 
@@ -64,17 +64,19 @@ def main():
     tts = not a.no_tts and (piper_ok() or (platform.system() == "Darwin" and shutil.which("say")))
 
     port = free_port()
-    server = subprocess.Popen([PY, ROOT / "assets" / "fixture" / "server.py", str(port)],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log = open(work / "fixture-server.log", "w", encoding="utf-8")
+    server = subprocess.Popen([PY, ROOT / "assets" / "fixture" / "server.py", str(port)], stdout=log, stderr=log)
     try:
-        for _ in range(50):
+        deadline = time.time() + 60                      # cold CI runners can take a while to start Python
+        while True:
             try:
-                socket.create_connection(("127.0.0.1", port), 0.2).close()
+                socket.create_connection(("127.0.0.1", port), 0.5).close()
                 break
             except OSError:
-                time.sleep(0.1)
-        else:
-            sys.exit("fixture server did not start")
+                if server.poll() is not None or time.time() > deadline:
+                    log.flush()
+                    sys.exit("fixture server did not start:\n" + (work / "fixture-server.log").read_text(encoding="utf-8"))
+                time.sleep(0.2)
         for mode in ("feature-demo",) if a.quick else ("feature-demo", "bug-report"):
             print(f"== {mode}", flush=True)
             sb = work / f"{mode}.yaml"
@@ -101,6 +103,7 @@ def main():
             run([PY, HERE / "report.py", rdir], capture=True)
     finally:
         server.terminate()
+        log.close()
     print(f"selftest OK ({'with' if tts else 'without'} narration). Videos: {work / 'video-out'}")
 
 

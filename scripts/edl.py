@@ -412,7 +412,7 @@ def render(run: pathlib.Path, src: str, inputs: list[str], has_audio: bool, draf
              "-pix_fmt", "yuv420p", "-r", str(FPS), "-movflags", "+faststart", out]
     t = time.time()
     cmd = ["ffmpeg", "-hide_banner", "-y", "-v", "error"] + args
-    r = subprocess.run(cmd, cwd=run, capture_output=True, text=True)
+    r = subprocess.run(cmd, cwd=run, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         die("ffmpeg failed (cwd " + str(run) + "):\n" + " ".join(cmd) + "\n" + r.stderr[-3000:])
     print(f"rendered {out} in {time.time() - t:.1f}s")
@@ -423,7 +423,7 @@ def render(run: pathlib.Path, src: str, inputs: list[str], has_audio: bool, draf
 
 def detect_spans(path: pathlib.Path, filt: str, key: str) -> list[tuple[float, float]]:
     r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path)] + filt.split(" ") +
-                       ["-f", "null", "-"], capture_output=True, text=True)
+                       ["-f", "null", "-"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     starts = [float(x) for x in re.findall(rf"{key}_start: ?([\d.]+)", r.stderr)]
     ends = [float(x) for x in re.findall(rf"{key}_end: ?([\d.]+)", r.stderr)]
     return list(zip(starts, ends + [float("inf")] * (len(starts) - len(ends))))

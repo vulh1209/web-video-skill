@@ -80,7 +80,7 @@ def contact_sheet(frames: list[tuple[pathlib.Path, str]], out: pathlib.Path, col
 
 def loudness(video: pathlib.Path) -> float | None:
     r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(video), "-af", "ebur128", "-f", "null", "-"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     m = re.findall(r"I:\s+(-?[\d.]+) LUFS", r.stderr)
     return float(m[-1]) if m else None
 
