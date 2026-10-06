@@ -1,0 +1,26 @@
+# outputs of the pipeline (may contain screenshots, HAR, traces of real apps)
+video-out/
+discover.json
+*.har
+trace*.zip
+*.webm
+*.mp4
+*.gif
+!docs/*.gif
+console*.json
+
+# storyboards and auth states that can hold credentials
+*.local.yaml
+*.secret.yaml
+auth*.json
+storage*.json
+.env
+.env.*
+
+# python / os
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+Thumbs.db
